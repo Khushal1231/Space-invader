@@ -2,9 +2,9 @@
  * Name: [Khushal]
  * Date: [2024-06-10]
  * Title: Galactic Boss Fight
- * Description: Pilot your starfighter using the Left and Right arrow keys and press Spacebar
- * to fire lasers at the alien Dreadnought Boss. Dodge incoming red energy orbs and defeat
- * both boss attack phases before your ship's health reaches zero!
+ * Description: Defend Earth by piloting your starfighter and shooting down waves of 
+ * descending alien invaders! Use weapon modes (which consume energy) and destroy the 
+ * entire alien fleet before they reach your ship or deplete your health.
  */
 
 // ---CANVAS & HUD setup---
@@ -13,6 +13,8 @@ const ctx = canvas.getContext('2d');
 const playerHpEl = document.getElementById('playerHp');
 const bossHpEl = document.getElementById('bossHp');
 const gameStateEl = document.getElementById('gameState');
+
+
 
 // --- LOAD IMAGES ---
 const images = {
