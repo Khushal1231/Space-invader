@@ -1,10 +1,10 @@
 /*
- * Name: [Khushal]
- * Date: [2024-06-10]
- * Title: Galactic Boss Fight
- * Description: Defend Earth by piloting your starfighter and shooting down waves of 
- * descending alien invaders! Use weapon modes (which consume energy) and destroy the 
- * entire alien fleet before they reach your ship or deplete your health.
+- Name: Khushal
+- Date: 2024-06-10
+- Title: Galactic Boss Fight
+- Description: Defend Earth by piloting your starfighter and shooting down waves of 
+- descending alien invaders! Use weapon modes (which consume energy) and destroy the 
+- entire alien fleet before they reach your ship or deplete your health.
  */
 
 // --- CANVAS & HUD SETUP ---
@@ -14,18 +14,35 @@ const playerHpEl = document.getElementById('playerHp');
 const bossHpEl = document.getElementById('bossHp');
 const gameStateEl = document.getElementById('gameState');
 
-// --- LOAD IMAGES ---
-const images = {
-  player: new Image(),
-  alien1: new Image(),
-  alien2: new Image(),
-  boss: new Image()
+// --- LOAD IMAGES SAFELY FOR GITHUB PAGES ---
+const imageSources = {
+  player: 'assets/player.jpg',
+  alien1: 'assets/alien1.png',
+  alien2: 'assets/alien2.png',
+  boss: 'assets/boss.png'
 };
 
-images.player.src = './assets/player.jpg';
-images.alien1.src = './assets/alien1.png';
-images.alien2.src = './assets/alien2.png';
-images.boss.src = './assets/boss.png';
+const images = {};
+let imagesLoaded = 0;
+const totalImages = Object.keys(imageSources).length;
+
+function loadImages(callback) {
+  for (let key in imageSources) {
+    images[key] = new Image();
+    images[key].src = imageSources[key];
+    
+    images[key].onload = () => {
+      imagesLoaded++;
+      if (imagesLoaded === totalImages) {
+        callback();
+      }
+    };
+
+    images[key].onerror = () => {
+      console.error(`Failed to load image: ${imageSources[key]}. Check path and capitalization on GitHub.`);
+    };
+  }
+}
 
 // Player properties
 const player = {
@@ -49,15 +66,18 @@ const alienHeight = 40;
 // Boss properties
 const boss = {
   x: canvas.width / 2 - 50,
-  y: 50,
+  y: 20,
   width: 100,
   height: 100,
   hp: 300,
-  speed: 2
+  speed: 2,
+  direction: 1,
+  shootTimer: 0
 };
 
 // Bullet properties
 const bullets = [];
+const enemyBullets = [];
 const bulletSpeed = 7;
 
 // Game state
@@ -66,8 +86,13 @@ let gameState = 'playing'; // 'playing', 'won', 'lost'
 // --- KEYBOARD INPUT ---
 const keys = {};
 document.addEventListener('keydown', (e) => {
+  // Prevent spacebar and arrow keys from scrolling the webpage on GitHub Pages
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    e.preventDefault();
+  }
   keys[e.key] = true;
 });
+
 document.addEventListener('keyup', (e) => {
   keys[e.key] = false;
 });
@@ -89,6 +114,7 @@ function update() {
   updatePlayer();
   updateBullets();
   updateAliens();
+  updateBoss();
   checkCollisions();
   checkWinCondition();
   updateHUD();
@@ -119,12 +145,45 @@ function updatePlayer() {
   }
 }
 
+// --- UPDATE BOSS ---
+function updateBoss() {
+  if (boss.hp <= 0) return;
+
+  // Move side to side
+  boss.x += boss.speed * boss.direction;
+  if (boss.x <= 0 || boss.x + boss.width >= canvas.width) {
+    boss.direction *= -1;
+  }
+
+  // Boss fires back periodically
+  boss.shootTimer++;
+  if (boss.shootTimer >= 90) {
+    enemyBullets.push({
+      x: boss.x + boss.width / 2 - 4,
+      y: boss.y + boss.height,
+      width: 8,
+      height: 15,
+      speed: 4
+    });
+    boss.shootTimer = 0;
+  }
+}
+
 // --- UPDATE BULLETS ---
 function updateBullets() {
+  // Player bullets
   for (let i = bullets.length - 1; i >= 0; i--) {
     bullets[i].y -= bulletSpeed;
     if (bullets[i].y < 0) {
       bullets.splice(i, 1);
+    }
+  }
+
+  // Boss bullets
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    enemyBullets[i].y += enemyBullets[i].speed;
+    if (enemyBullets[i].y > canvas.height) {
+      enemyBullets.splice(i, 1);
     }
   }
 }
@@ -146,9 +205,15 @@ function draw() {
     ctx.drawImage(images.boss, boss.x, boss.y, boss.width, boss.height);
   }
 
-  // Draw bullets
+  // Draw player bullets
   bullets.forEach((bullet) => {
     ctx.fillStyle = 'yellow';
+    ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+  });
+
+  // Draw boss bullets
+  enemyBullets.forEach((bullet) => {
+    ctx.fillStyle = 'red';
     ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
   });
 }
@@ -175,19 +240,14 @@ function updateAliens() {
 
 // --- CHECK COLLISIONS ---
 function checkCollisions() {
+  // Player bullets vs Aliens & Boss
   for (let bIndex = bullets.length - 1; bIndex >= 0; bIndex--) {
     const bullet = bullets[bIndex];
     let bulletHit = false;
 
-    // Check collision with aliens
     for (let aIndex = aliens.length - 1; aIndex >= 0; aIndex--) {
       const alien = aliens[aIndex];
-      if (
-        bullet.x < alien.x + alien.width &&
-        bullet.x + bullet.width > alien.x &&
-        bullet.y < alien.y + alien.height &&
-        bullet.y + bullet.height > alien.y
-      ) {
+      if (isColliding(bullet, alien)) {
         aliens.splice(aIndex, 1);
         bullets.splice(bIndex, 1);
         bulletHit = true;
@@ -195,19 +255,45 @@ function checkCollisions() {
       }
     }
 
-    // Check collision with boss (only if bullet didn't already hit an alien)
-    if (!bulletHit && boss.hp > 0) {
-      if (
-        bullet.x < boss.x + boss.width &&
-        bullet.x + bullet.width > boss.x &&
-        bullet.y < boss.y + boss.height &&
-        bullet.y + bullet.height > boss.y
-      ) {
-        boss.hp -= 10;
-        bullets.splice(bIndex, 1);
+    if (!bulletHit && boss.hp > 0 && isColliding(bullet, boss)) {
+      boss.hp -= 10;
+      bullets.splice(bIndex, 1);
+    }
+  }
+
+  // Boss bullets vs Player
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    if (isColliding(enemyBullets[i], player)) {
+      player.hp -= 20;
+      enemyBullets.splice(i, 1);
+      if (player.hp <= 0) {
+        player.hp = 0;
+        gameState = 'lost';
       }
     }
   }
+
+  // Aliens crashing into Player
+  for (let i = aliens.length - 1; i >= 0; i--) {
+    if (isColliding(aliens[i], player)) {
+      player.hp -= 25;
+      aliens.splice(i, 1);
+      if (player.hp <= 0) {
+        player.hp = 0;
+        gameState = 'lost';
+      }
+    }
+  }
+}
+
+// Helper for bounding-box collision
+function isColliding(rect1, rect2) {
+  return (
+    rect1.x < rect2.x + rect2.width &&
+    rect1.x + rect1.width > rect2.x &&
+    rect1.y < rect2.y + rect2.height &&
+    rect1.y + rect1.height > rect2.y
+  );
 }
 
 // --- CHECK WIN CONDITION ---
@@ -219,9 +305,9 @@ function checkWinCondition() {
 
 // --- UPDATE HUD ---
 function updateHUD() {
-  playerHpEl.textContent = `Player HP: ${player.hp}`;
-  bossHpEl.textContent = `Boss HP: ${Math.max(0, boss.hp)}`;
-  gameStateEl.textContent = `Game State: ${gameState}`;
+  if (playerHpEl) playerHpEl.textContent = `Player HP: ${player.hp}`;
+  if (bossHpEl) bossHpEl.textContent = `Boss HP: ${Math.max(0, boss.hp)}`;
+  if (gameStateEl) gameStateEl.textContent = `Game State: ${gameState}`;
 }
 
 // --- DRAW GAME OVER ---
@@ -245,7 +331,7 @@ function initializeAliens() {
     for (let col = 0; col < alienCols; col++) {
       aliens.push({
         x: col * (alienWidth + 10) + 50,
-        y: row * (alienHeight + 10) + 50,
+        y: row * (alienHeight + 10) + 130, // Moved down below the boss
         width: alienWidth,
         height: alienHeight,
         speed: 0.3,
@@ -255,6 +341,8 @@ function initializeAliens() {
   }
 }
 
-// --- START GAME ---
-initializeAliens();
-gameLoop();
+// --- START GAME AFTER IMAGES LOAD ---
+loadImages(() => {
+  initializeAliens();
+  gameLoop();
+});
