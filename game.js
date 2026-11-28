@@ -44,6 +44,15 @@ function loadImages(callback) {
   }
 }
 
+// --- DIFFICULTY SETTINGS ---
+const difficultySettings = {
+  easy: { label: 'Easy', bossBaseSpeed: 1.5, alienSpeed: 0.2, bossShootInterval: 110 },
+  normal: { label: 'Normal', bossBaseSpeed: 2.5, alienSpeed: 0.35, bossShootInterval: 90 },
+  hard: { label: 'Hard', bossBaseSpeed: 3.8, alienSpeed: 0.55, bossShootInterval: 65 }
+};
+
+let currentDifficulty = 'normal';
+
 // Player properties
 const player = {
   x: canvas.width / 2 - 25,
@@ -70,7 +79,9 @@ const boss = {
   width: 100,
   height: 100,
   hp: 300,
-  speed: 2,
+  maxHp: 300,
+  baseSpeed: 2.5,
+  speed: 2.5,
   direction: 1,
   shootTimer: 0
 };
@@ -80,22 +91,112 @@ const bullets = [];
 const enemyBullets = [];
 const bulletSpeed = 7;
 
-// Game state
-let gameState = 'playing'; // 'playing', 'won', 'lost'
+// Game state: 'menu', 'playing', 'won', 'lost'
+let gameState = 'menu';
 
-// --- KEYBOARD INPUT ---
+// --- UI BUTTON REGIONS FOR MOUSE CLICKS ---
+const menuButtons = [
+  { id: 'easy', label: 'Easy Mode (1)', x: canvas.width / 2 - 110, y: 190, width: 220, height: 42, color: '#2ecc71' },
+  { id: 'normal', label: 'Normal Mode (2)', x: canvas.width / 2 - 110, y: 248, width: 220, height: 42, color: '#f1c40f' },
+  { id: 'hard', label: 'Hard Mode (3)', x: canvas.width / 2 - 110, y: 306, width: 220, height: 42, color: '#e74c3c' }
+];
+
+const endButtons = [
+  { id: 'restart', label: 'Play Again (R)', x: canvas.width / 2 - 110, y: canvas.height / 2 + 30, width: 220, height: 42, color: '#3498db' },
+  { id: 'menu', label: 'Change Difficulty (M)', x: canvas.width / 2 - 110, y: canvas.height / 2 + 85, width: 220, height: 42, color: '#9b59b6' }
+];
+
+// --- START OR RESTART GAME WITH SELECTED DIFFICULTY ---
+function startGame(difficultyKey) {
+  currentDifficulty = difficultyKey;
+  const settings = difficultySettings[currentDifficulty];
+
+  // Reset player
+  player.x = canvas.width / 2 - 25;
+  player.y = canvas.height - 60;
+  player.hp = 100;
+  player.energy = 100;
+  player.shootCooldown = 0;
+
+  // Reset boss with difficulty speed
+  boss.x = canvas.width / 2 - 50;
+  boss.y = 20;
+  boss.hp = boss.maxHp;
+  boss.baseSpeed = settings.bossBaseSpeed;
+  boss.speed = settings.bossBaseSpeed;
+  boss.direction = 1;
+  boss.shootTimer = 0;
+
+  // Clear bullets & rebuild aliens
+  bullets.length = 0;
+  enemyBullets.length = 0;
+  initializeAliens(settings.alienSpeed);
+
+  gameState = 'playing';
+  updateHUD();
+  requestAnimationFrame(gameLoop);
+}
+
+// --- KEYBOARD & MOUSE INPUT ---
 const keys = {};
 document.addEventListener('keydown', (e) => {
-  // Prevent spacebar and arrow keys from scrolling the webpage on GitHub Pages
   if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
     e.preventDefault();
   }
   keys[e.key] = true;
+
+  // Difficulty selection via keyboard on menu
+  if (gameState === 'menu') {
+    if (e.key === '1') startGame('easy');
+    if (e.key === '2') startGame('normal');
+    if (e.key === '3') startGame('hard');
+  }
+
+  // Restart or return to menu on win/loss
+  if (gameState === 'won' || gameState === 'lost') {
+    if (e.key === 'r' || e.key === 'R') {
+      startGame(currentDifficulty);
+    } else if (e.key === 'm' || e.key === 'M') {
+      gameState = 'menu';
+      updateHUD();
+      drawMenu();
+    }
+  }
 });
 
 document.addEventListener('keyup', (e) => {
   keys[e.key] = false;
 });
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  if (gameState === 'menu') {
+    menuButtons.forEach((btn) => {
+      if (isPointInRect(clickX, clickY, btn)) {
+        startGame(btn.id);
+      }
+    });
+  } else if (gameState === 'won' || gameState === 'lost') {
+    endButtons.forEach((btn) => {
+      if (isPointInRect(clickX, clickY, btn)) {
+        if (btn.id === 'restart') {
+          startGame(currentDifficulty);
+        } else if (btn.id === 'menu') {
+          gameState = 'menu';
+          updateHUD();
+          drawMenu();
+        }
+      }
+    });
+  }
+});
+
+function isPointInRect(x, y, rect) {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+}
 
 // --- GAME LOOP ---
 function gameLoop() {
@@ -103,7 +204,7 @@ function gameLoop() {
     update();
     draw();
     requestAnimationFrame(gameLoop);
-  } else {
+  } else if (gameState === 'won' || gameState === 'lost') {
     updateHUD();
     drawGameOver();
   }
@@ -149,15 +250,24 @@ function updatePlayer() {
 function updateBoss() {
   if (boss.hp <= 0) return;
 
+  // Dynamic speed scaling: increases up to 2.2x baseSpeed as boss HP approaches 0
+  const missingHpRatio = 1 - boss.hp / boss.maxHp;
+  boss.speed = boss.baseSpeed * (1 + missingHpRatio * 1.2);
+
   // Move side to side
   boss.x += boss.speed * boss.direction;
-  if (boss.x <= 0 || boss.x + boss.width >= canvas.width) {
-    boss.direction *= -1;
+  if (boss.x <= 0) {
+    boss.x = 0;
+    boss.direction = 1;
+  } else if (boss.x + boss.width >= canvas.width) {
+    boss.x = canvas.width - boss.width;
+    boss.direction = -1;
   }
 
-  // Boss fires back periodically
+  // Boss fires back periodically based on difficulty
+  const shootInterval = difficultySettings[currentDifficulty].bossShootInterval;
   boss.shootTimer++;
-  if (boss.shootTimer >= 90) {
+  if (boss.shootTimer >= shootInterval) {
     enemyBullets.push({
       x: boss.x + boss.width / 2 - 4,
       y: boss.y + boss.height,
@@ -186,6 +296,35 @@ function updateBullets() {
       enemyBullets.splice(i, 1);
     }
   }
+}
+
+// --- DRAW MENU ---
+function drawMenu() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = 'black';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 28px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('GALACTIC BOSS FIGHT', canvas.width / 2, 100);
+
+  ctx.font = '16px Arial';
+  ctx.fillStyle = '#cccccc';
+  ctx.fillText('Select Difficulty Level to Begin', canvas.width / 2, 145);
+
+  menuButtons.forEach((btn) => {
+    ctx.fillStyle = btn.color;
+    ctx.fillRect(btn.x, btn.y, btn.width, btn.height);
+
+    ctx.fillStyle = btn.id === 'hard' ? 'white' : 'black';
+    ctx.font = 'bold 15px Arial';
+    ctx.fillText(btn.label, btn.x + btn.width / 2, btn.y + 26);
+  });
+
+  ctx.fillStyle = '#aaaaaa';
+  ctx.font = '13px Arial';
+  ctx.fillText('Arrow Keys: Move | Spacebar: Shoot', canvas.width / 2, 395);
 }
 
 // --- DRAW GAME ---
@@ -257,6 +396,7 @@ function checkCollisions() {
 
     if (!bulletHit && boss.hp > 0 && isColliding(bullet, boss)) {
       boss.hp -= 10;
+      if (boss.hp < 0) boss.hp = 0;
       bullets.splice(bIndex, 1);
     }
   }
@@ -305,9 +445,10 @@ function checkWinCondition() {
 
 // --- UPDATE HUD ---
 function updateHUD() {
-  if (playerHpEl) playerHpEl.textContent = `Player HP: ${player.hp}`;
-  if (bossHpEl) bossHpEl.textContent = `Boss HP: ${Math.max(0, boss.hp)}`;
-  if (gameStateEl) gameStateEl.textContent = `Game State: ${gameState}`;
+  const diffLabel = difficultySettings[currentDifficulty].label;
+  if (playerHpEl) playerHpEl.textContent = player.hp;
+  if (bossHpEl) bossHpEl.textContent = Math.max(0, boss.hp);
+  if (gameStateEl) gameStateEl.textContent = `${gameState.toUpperCase()} (${diffLabel})`;
 }
 
 // --- DRAW GAME OVER ---
@@ -315,34 +456,45 @@ function drawGameOver() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = 'black';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = 'white';
-  ctx.font = '30px Arial';
+
   ctx.textAlign = 'center';
-  if (gameState === 'won') {
-    ctx.fillText('You Won!', canvas.width / 2, canvas.height / 2);
-  } else if (gameState === 'lost') {
-    ctx.fillText('Game Over!', canvas.width / 2, canvas.height / 2);
-  }
+  ctx.fillStyle = gameState === 'won' ? '#2ecc71' : '#e74c3c';
+  ctx.font = 'bold 30px Arial';
+  ctx.fillText(gameState === 'won' ? 'You Won!' : 'Game Over!', canvas.width / 2, canvas.height / 2 - 35);
+
+  ctx.fillStyle = '#cccccc';
+  ctx.font = '16px Arial';
+  ctx.fillText(`Difficulty: ${difficultySettings[currentDifficulty].label}`, canvas.width / 2, canvas.height / 2);
+
+  endButtons.forEach((btn) => {
+    ctx.fillStyle = btn.color;
+    ctx.fillRect(btn.x, btn.y, btn.width, btn.height);
+
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 15px Arial';
+    ctx.fillText(btn.label, btn.x + btn.width / 2, btn.y + 26);
+  });
 }
 
 // --- INITIALIZE ALIENS ---
-function initializeAliens() {
+function initializeAliens(alienSpeed) {
+  aliens.length = 0;
   for (let row = 0; row < alienRows; row++) {
     for (let col = 0; col < alienCols; col++) {
       aliens.push({
         x: col * (alienWidth + 10) + 50,
-        y: row * (alienHeight + 10) + 130, // Moved down below the boss
+        y: row * (alienHeight + 10) + 130,
         width: alienWidth,
         height: alienHeight,
-        speed: 0.3,
+        speed: alienSpeed,
         image: row % 2 === 0 ? images.alien1 : images.alien2
       });
     }
   }
 }
 
-// --- START GAME AFTER IMAGES LOAD ---
+// --- SHOW DIFFICULTY MENU AFTER IMAGES LOAD ---
 loadImages(() => {
-  initializeAliens();
-  gameLoop();
+  updateHUD();
+  drawMenu();
 });
