@@ -39,7 +39,12 @@ function loadImages(callback) {
     };
 
     images[key].onerror = () => {
-      console.error(`Failed to load image: ${imageSources[key]}. Check path and capitalization on GitHub.`);
+      console.error(`Missing image: ${imageSources[key]} - using fallback shape`);
+      images[key].loaded = false;
+      imagesLoaded++;
+      if (imagesLoaded === totalImages) {
+        callback();
+      }
     };
   }
 }
